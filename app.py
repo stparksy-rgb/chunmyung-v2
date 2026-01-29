@@ -1,14 +1,16 @@
 """
 천명 VIP - 프리미엄 사주 분석 시스템
-통합 버전 v2.2 - 전문 명리학 UI + 가독성 개선
+통합 버전 v3.0 - 개인화 + 시점 반영 + PDF 저장
 
-만세력 자동 계산 + AI 심층 통변 + 후속 질문
+만세력 자동 계산 + AI 심층 통변 + 후속 질문 + PDF 다운로드
 Copyright 2026 JEMINA AI
 """
 
 import streamlit as st
 from datetime import datetime, date
 import anthropic
+import io
+import base64
 from manseryuk_engine import (
     calculate_saju, format_saju_display,
     CHEONGAN_OHAENG, OHAENG_KR, OHAENG,
@@ -26,40 +28,86 @@ st.set_page_config(
 )
 
 # =====================================================
-# VIP 시스템 프롬프트
+# VIP 시스템 프롬프트 (v3.0 - 개인화 + 시점 반영)
 # =====================================================
-SYSTEM_PROMPT = """당신은 대한민국 상위 1%의 고객만을 상대하는 심층 사주 명리학 전문가 '천명 VIP'입니다.
+SYSTEM_PROMPT = """당신은 대한민국 상위 1%의 VIP 고객만을 위한 심층 명리 컨설턴트 **'천명 VIP'**입니다.
 
-### [핵심 행동 지침]
+## 🎯 핵심 원칙
 
-1. **단답형 금지**: "재물운이 좋습니다" 같은 짧은 답변 금지. 논리적 근거와 함께 5~6문장 이상 상세히 서술.
+### 1. 개인화된 스토리텔링
+- 매번 다른 비유와 표현 사용 (정해일주라도 "호수의 촛불", "밤바다의 등대", "겨울밤 벽난로" 등 다양하게)
+- 의뢰인의 이름이 있으면 "○○○님 귀하"로 존칭
+- 획일적인 템플릿 금지. 각 사주의 고유한 특성을 시적으로 표현
 
-2. **구조화된 답변**: 체계적으로 목차를 나누어 작성
-   - 타고난 기질/격국/용신 분석
-   - 현재 대운/세운 분석  
-   - 분야별 운세 (직업/재물/건강/인간관계)
-   - 개운법 및 조언
+### 2. 현재 시점 중심 분석 (매우 중요!)
+- **오늘 날짜를 반드시 확인**하고, 현재 월(月)을 기준으로 분석
+- 1~3월이면 "올해 초입", 4~6월이면 "상반기 중반", 7~9월이면 "하반기 진입", 10~12월이면 "연말 마무리" 관점
+- **남은 기간**에 집중: "앞으로 남은 ○개월 동안..."
+- 이미 지난 달은 간략히, **앞으로 올 달은 상세히**
 
-3. **전문 용어 + 쉬운 풀이**: 격국, 용신, 충합 등 전문 용어 사용 후 반드시 쉽게 풀어 설명
+### 3. 월별 운세표 필수 포함 (종합운세 분석 시)
+종합운세를 분석할 때는 반드시 아래 형식의 월별 표를 포함:
 
-4. **따뜻한 상담가 태도**: 정중하고 진지하며, 부정적 해석도 희망적 대안과 함께 제시
+| 시기 | 운세 흐름 및 조언 |
+|------|------------------|
+| 1~3월 (봄) | [구체적 조언] |
+| 4~6월 (여름) | [구체적 조언] |
+| 7~9월 (가을) | [구체적 조언] |
+| 10~12월 (겨울) | [구체적 조언] |
 
-5. **현재 시점 기반**: 오늘 날짜를 기준으로 대운/세운 분석.
+### 4. 한자 최소화, 쉬운 표현 우선
+- ❌ "丁火 일간은 음화로서..."
+- ✅ "정화(불꽃의 기운) 일간이신 귀하는..."
+- 전문 용어는 반드시 괄호 안에 쉬운 설명 추가
 
-### [나이별 맞춤 통변]
-- **20대**: 진로, 취업, 연애, 자기계발 중심
-- **30대**: 결혼, 출산, 커리어 성장, 재테크 중심
-- **40대**: 자녀 교육, 사업/승진, 건강, 노후 준비 중심
-- **50대 이상**: 은퇴 준비, 부부 관계, 건강, 제2의 인생 중심
+### 5. VIP 톤앤매너
+**오프닝 예시:**
+"귀하의 사주 원국을 정밀하게 분석한 결과, [시적 비유]의 고귀한 성정이 돋보입니다. 현재 [년월] 시점에서, 귀하의 인생에 중요한 운의 변곡점에 서 계십니다."
 
-**주의:** 40대 이상은 "연애운"이 아닌 "부부운/가정운"으로 표현. 미혼이라고 직접 밝힌 경우에만 연애운 언급.
+**마무리 예시:**
+- "강한 빛은 그림자를 만듭니다. 올해의 강한 기운을 지혜롭게 활용하십시오."
+- "물은 낮은 곳으로 흐르듯, 겸손함이 귀하의 운을 열어줄 열쇠입니다."
+- "천명 VIP는 귀하의 앞날에 늘 서광이 비치길 기원합니다."
 
-### [생년월일 표기]
-- 음력 입력 시 "음력 ○년 ○월 ○일생"으로 표기
-- 양력 입력 시 "양력 ○년 ○월 ○일생"으로 표기
+### 6. 구체적이고 실천 가능한 개운법
+- ❌ "동쪽이 길방입니다"
+- ✅ "거주지나 사무실의 동쪽에 생기 있는 화분을 두시면 재물운이 살아납니다"
+- ✅ "하루 20분 물소리를 들으며 명상하시면 심신의 균형에 도움이 됩니다"
+- ✅ "청색 계열의 넥타이나 스카프가 귀하의 기운을 안정시켜줍니다"
 
-### [말투]
-- 존칭 사용, 따뜻한 어조, 정중한 표현"""
+### 7. 나이대별 현실적 조언
+- **20대**: 취업, 진로, 연애, 자기계발
+- **30대**: 결혼, 출산, 커리어 성장, 내 집 마련
+- **40대**: 자녀 교육, 승진/사업, 건강 관리, 노후 준비 시작
+- **50대**: 은퇴 준비, 제2의 인생, 부부관계, 건강이 최우선
+- **60대 이상**: 건강 관리, 손자녀, 여가, 인생 정리
+
+**40대 이상은 "연애운" 대신 "가정운/부부운"으로 표현** (미혼이라 밝힌 경우 제외)
+
+### 8. 특별한 신살(神殺) 언급
+천을귀인, 문창귀인, 역마살, 도화살 등 특별한 신살이 있으면 반드시 언급하고 그 의미를 설명
+
+### 9. 분량 및 깊이
+- 종합운세: 최소 2,000자 이상
+- 개별 운세(직업운, 재물운 등): 최소 800자 이상
+- 짧은 답변 금지. VIP 고객에게 성의없는 답변은 결례
+
+### 10. 위험 신호 시 명확한 경고
+- 충(沖), 형(刑), 파(破), 해(害) 등 흉한 기운이 있으면 구체적으로 경고
+- 단, 희망적 대안과 함께 제시 (공포 조장 금지)
+
+## 📋 응답 구조 (종합운세 분석 시)
+
+1. **VIP 오프닝** - 시적 비유와 함께 인사
+2. **타고난 기질 분석** - 일주의 특성, 성격, 재능
+3. **현재 대운 분석** - 지금 어떤 흐름인지
+4. **올해 세운 분석** - 현재 년도의 특징
+5. **월별 운세표** - 4계절 또는 분기별
+6. **분야별 운세** - 직업/재물/건강/가정
+7. **VIP 개운 처방** - 구체적 실천법
+8. **명언과 함께 마무리**
+
+이제 의뢰인의 사주와 질문에 VIP 프리미엄 수준으로 답변하십시오."""
 
 
 # =====================================================
@@ -372,7 +420,7 @@ with st.sidebar:
             st.rerun()
     
     st.markdown("---")
-    st.caption("ⓒ 2026 JEMINA AI · 천명 VIP v2.2")
+    st.caption("ⓒ 2026 JEMINA AI · 천명 VIP v3.0")
 
 
 # =====================================================
@@ -552,6 +600,152 @@ if st.session_state.saju_calculated and st.session_state.saju:
         else:
             st.markdown(f"""<div class='chat-assistant'><strong style='color:#2ea043;'>🔮 천명 VIP:</strong><br><br>{msg["content"]}</div>""", unsafe_allow_html=True)
     
+    # PDF 다운로드 기능 (AI 응답이 있을 때만 표시)
+    if st.session_state.messages and any(m["role"] == "assistant" for m in st.session_state.messages):
+        st.markdown("---")
+        
+        # 전체 대화 내용을 텍스트로 생성
+        pdf_content = f"""═══════════════════════════════════════════════════
+🔮 천명 VIP - 프리미엄 사주 분석 리포트
+═══════════════════════════════════════════════════
+
+📅 분석 일시: {datetime.now().strftime('%Y년 %m월 %d일 %H:%M')}
+
+【의뢰인 정보】
+{'• 성함: ' + user_name + '님' if user_name else ''}
+• 생년월일: {date_type} {display_date}
+• 양력 변환: {saju['solar_date']}
+• 나이: {korean_age}세
+• 성별: {saju['gender']}
+• 띠: {saju['animal']}띠
+
+【사주팔자】
+┌────────┬────────┬────────┬────────┐
+│  시주  │  일주⭐ │  월주  │  연주  │
+├────────┼────────┼────────┼────────┤
+│ {saju['hour_pillar'][0]} {saju['hour_pillar'][1]}  │ {saju['day_pillar'][0]} {saju['day_pillar'][1]}  │ {saju['month_pillar'][0]} {saju['month_pillar'][1]}  │ {saju['year_pillar'][0]} {saju['year_pillar'][1]}  │
+│ {saju['hour_pillar_kr']}  │ {saju['day_pillar_kr']}  │ {saju['month_pillar_kr']}  │ {saju['year_pillar_kr']}  │
+└────────┴────────┴────────┴────────┘
+
+【일간】{saju['day_gan_kr']} ({CHEONGAN_OHAENG[saju['day_gan']]})
+
+【오행분포】
+木: {saju['ohaeng_count']['木']} | 火: {saju['ohaeng_count']['火']} | 土: {saju['ohaeng_count']['土']} | 金: {saju['ohaeng_count']['金']} | 水: {saju['ohaeng_count']['水']}
+
+【대운 흐름】
+{' → '.join([f"{d['pillar_kr']}({d['age']}세~)" for d in saju['daeun']])}
+
+═══════════════════════════════════════════════════
+📝 상담 내용
+═══════════════════════════════════════════════════
+
+"""
+        # 대화 내용 추가
+        for msg in st.session_state.messages:
+            if msg["role"] == "user":
+                pdf_content += f"\n▶ 질문: {msg['content']}\n"
+            else:
+                pdf_content += f"\n🔮 천명 VIP 답변:\n{msg['content']}\n"
+                pdf_content += "\n" + "─" * 50 + "\n"
+        
+        pdf_content += f"""
+═══════════════════════════════════════════════════
+ⓒ 2026 JEMINA AI · 천명 VIP v3.0
+본 리포트는 참고용이며, 중요한 결정은 전문가와 상담하시기 바랍니다.
+═══════════════════════════════════════════════════
+"""
+        
+        # 다운로드 버튼들
+        col_dl1, col_dl2 = st.columns(2)
+        
+        with col_dl1:
+            # 텍스트 파일 다운로드
+            file_name = f"천명VIP_사주분석_{user_name if user_name else '고객'}_{datetime.now().strftime('%Y%m%d')}.txt"
+            st.download_button(
+                label="📄 텍스트 파일 저장",
+                data=pdf_content.encode('utf-8'),
+                file_name=file_name,
+                mime="text/plain",
+                use_container_width=True
+            )
+        
+        with col_dl2:
+            # 마크다운/HTML 파일 다운로드 (PDF 대안)
+            html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>천명 VIP 사주 분석 리포트</title>
+    <style>
+        body {{ font-family: 'Malgun Gothic', sans-serif; padding: 40px; line-height: 1.8; background: #1a1a2e; color: #e6edf3; }}
+        h1 {{ color: #ffd700; text-align: center; }}
+        h2 {{ color: #ffd700; border-bottom: 2px solid #ffd700; padding-bottom: 10px; }}
+        .info-box {{ background: #21262d; padding: 20px; border-radius: 10px; margin: 20px 0; }}
+        .saju-table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+        .saju-table th, .saju-table td {{ border: 1px solid #30363d; padding: 15px; text-align: center; }}
+        .saju-table th {{ background: #ffd700; color: #000; }}
+        .question {{ background: rgba(255,215,0,0.1); padding: 15px; border-left: 4px solid #ffd700; margin: 20px 0; }}
+        .answer {{ background: rgba(46,160,67,0.1); padding: 15px; border-left: 4px solid #2ea043; margin: 20px 0; }}
+        .footer {{ text-align: center; color: #8b949e; margin-top: 50px; padding-top: 20px; border-top: 1px solid #30363d; }}
+    </style>
+</head>
+<body>
+    <h1>🔮 천명 VIP 사주 분석 리포트</h1>
+    <p style="text-align: center; color: #8b949e;">분석 일시: {datetime.now().strftime('%Y년 %m월 %d일 %H:%M')}</p>
+    
+    <div class="info-box">
+        <h2>📋 의뢰인 정보</h2>
+        {'<p><strong>성함:</strong> ' + user_name + '님</p>' if user_name else ''}
+        <p><strong>생년월일:</strong> {date_type} {display_date} (양력 {saju['solar_date']})</p>
+        <p><strong>나이:</strong> {korean_age}세 | <strong>성별:</strong> {saju['gender']} | <strong>띠:</strong> {saju['animal']}띠</p>
+    </div>
+    
+    <h2>🏛️ 사주팔자</h2>
+    <table class="saju-table">
+        <tr><th>시주</th><th>일주 ⭐</th><th>월주</th><th>연주</th></tr>
+        <tr>
+            <td>{saju['hour_pillar'][0]} {saju['hour_pillar'][1]}<br><small>{saju['hour_pillar_kr']}</small></td>
+            <td style="border: 2px solid #ffd700;">{saju['day_pillar'][0]} {saju['day_pillar'][1]}<br><small>{saju['day_pillar_kr']}</small></td>
+            <td>{saju['month_pillar'][0]} {saju['month_pillar'][1]}<br><small>{saju['month_pillar_kr']}</small></td>
+            <td>{saju['year_pillar'][0]} {saju['year_pillar'][1]}<br><small>{saju['year_pillar_kr']}</small></td>
+        </tr>
+    </table>
+    
+    <div class="info-box">
+        <p><strong>일간:</strong> {saju['day_gan_kr']} ({CHEONGAN_OHAENG[saju['day_gan']]})</p>
+        <p><strong>오행분포:</strong> 木 {saju['ohaeng_count']['木']} | 火 {saju['ohaeng_count']['火']} | 土 {saju['ohaeng_count']['土']} | 金 {saju['ohaeng_count']['金']} | 水 {saju['ohaeng_count']['水']}</p>
+    </div>
+    
+    <h2>📝 상담 내용</h2>
+"""
+            # 대화 내용 HTML로 추가
+            for msg in st.session_state.messages:
+                if msg["role"] == "user":
+                    html_content += f'<div class="question"><strong>▶ 질문:</strong> {msg["content"]}</div>'
+                else:
+                    # 마크다운을 HTML로 변환 (간단하게)
+                    answer_html = msg["content"].replace("\n", "<br>")
+                    html_content += f'<div class="answer"><strong>🔮 천명 VIP:</strong><br><br>{answer_html}</div>'
+            
+            html_content += f"""
+    <div class="footer">
+        <p>ⓒ 2026 JEMINA AI · 천명 VIP v3.0</p>
+        <p>본 리포트는 참고용이며, 중요한 결정은 전문가와 상담하시기 바랍니다.</p>
+    </div>
+</body>
+</html>"""
+            
+            html_file_name = f"천명VIP_사주분석_{user_name if user_name else '고객'}_{datetime.now().strftime('%Y%m%d')}.html"
+            st.download_button(
+                label="🌐 HTML 리포트 저장",
+                data=html_content.encode('utf-8'),
+                file_name=html_file_name,
+                mime="text/html",
+                use_container_width=True
+            )
+        
+        st.caption("💡 HTML 파일은 브라우저에서 열어 '인쇄 > PDF로 저장'하면 PDF로 변환됩니다.")
+    
     # API 호출
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
         with st.spinner("🔮 천명 VIP가 사주를 분석하고 있습니다..."):
@@ -583,13 +777,14 @@ else:
     </div>
     """, unsafe_allow_html=True)
     
-    st.markdown("### ✨ 천명 VIP 특징")
+    st.markdown("### ✨ 천명 VIP v3.0 새로운 기능")
     
-    feat_cols = st.columns(3)
+    feat_cols = st.columns(4)
     features = [
         ("📐 정밀 만세력", "절기 기준 정확한 사주 계산\n음력/양력 자동 변환"),
-        ("🤖 AI 심층 통변", "나이별 맞춤 현실적 조언\n전문가 수준의 분석"),
+        ("🤖 개인화 통변", "월별 운세표 포함\nVIP 맞춤 스토리텔링"),
         ("💬 무제한 질문", "궁금한 거 뭐든 물어보세요\n채팅으로 후속 질문 가능"),
+        ("📄 리포트 저장", "분석 결과를 파일로 저장\nHTML/텍스트 다운로드"),
     ]
     
     for i, (title, desc) in enumerate(features):
